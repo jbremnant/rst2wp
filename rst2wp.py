@@ -384,7 +384,7 @@ class Rst2Wp(Application):
         # put it at the end of the text if it doesn't exist
         if has_keystring==False:
           #  lines.append(new_line)
-          lines.insert_(0, new_line)
+          lines.insert(0, new_line)
 
         self.text = '\n'.join(lines)
 
@@ -567,6 +567,7 @@ class Rst2Wp(Application):
                 post_id = wp.new_page(post, publish)
             else:
                 post_id = wp.new_post(post, publish)
+
             self.save_post_info(reader.document, 'id', str(post_id))
 
         self.save_post_info(reader.document, 'title', fields['title'])

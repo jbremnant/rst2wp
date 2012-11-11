@@ -196,6 +196,10 @@ class WordPressCategory(CategoryBase):
         super(WordPressCategory, self).__init__(id=id, name=name, description=description, slug=slug, html_url=html_url, rss_url=rss_url)
         self.parent_id = parent_id or '0'  # '0' means no parent
 
+    def __str__(self):
+      return str(self.to_xmlrpc())
+
+
     @classmethod
     def from_xmlrpc(cls, cat):
         # N.B. WP's many APIs are pretty inconsistent with what they
@@ -222,8 +226,10 @@ class WordPressCategory(CategoryBase):
                 'description': self.description,
                 'slug': self.slug,
                 'parent_id': self.parent_id}
-
         return data
+
+
+
 
 class WordPressPost():
     """Represents post item
@@ -231,8 +237,9 @@ class WordPressPost():
     def __init__(self, id=None, title=None, date=None, permaLink=None,
                  description=None, textMore=None, excerpt=None, link=None,
                  categories=None, tags=None, user=None, allowPings=None,
-                 allowComments=None):
+                 allowComments=None, parent_id=None):
         self.id = id or None  # indicates not-yet-saved
+        self.parent_id = parent_id or None  # indicates not-yet-saved
         self.title = title or ''
         self.date = date or None
         self.permaLink = permaLink or ''
@@ -245,6 +252,10 @@ class WordPressPost():
         self.user = user or ''  # N.B. userid as string
         self.allowPings = allowPings or False
         self.allowComments = allowComments or False
+
+    def __str__(self):
+      catstr = ",".join([ cat.name for cat in self.categories ])
+      return "title: %s, id:%d cat:%s" % (self.title, self.id, catstr)
 
 
 def wordpress_call(func):
@@ -273,25 +284,51 @@ class WordPressClient():
 
     def _filterPost(self, post):
         """Transform post struct in WordPressPost instance
+        ['post_mime_type', 'post_date_gmt', 'sticky', 'post_date', 'post_type', 'post_modified', 'menu_order', 'guid', 'custom_fields', 'post_title', 'post_status', 'post_content', 'post_parent', 'post_password', 'terms', 'post_thumbnail', 'ping_status', 'post_id', 'link', 'post_author', 'comment_status', 'post_format', 'post_name', 'post_modified_gmt', 'post_excerpt']
         """
         postObj = WordPressPost()
-        postObj.permaLink       = post['permaLink']
-        postObj.description     = post['description']
-        postObj.title           = post['title']
-        postObj.excerpt         = post['mt_excerpt']
-        postObj.user            = post['userid']
-        postObj.date            = time.strptime(str(post['date_created_gmt']), "%Y%m%dT%H:%M:%S")
-        print "Parsing date:", postObj.date, post['dateCreated']
+
+        # postObj.permaLink       = post['permaLink']
+        # postObj.description     = post['description']
+        # postObj.title           = post['title']
+        # postObj.excerpt         = post['mt_excerpt']
+        # postObj.user            = post['userid']
+        # postObj.date            = time.strptime(str(post['date_created_gmt']), "%Y%m%dT%H:%M:%S")
+        # print "Parsing date:", postObj.date, post['dateCreated']
+        # postObj.link            = post['link']
+        # postObj.textMore        = post['mt_text_more']
+        # postObj.allowComments   = post['mt_allow_comments'] == 1
+        # postObj.id              = int(post['postid'])
+        # categories = []
+        # for catname in post['categories']:
+        #     categories.append(WordPressCategory(name=catname))
+
+        # postObj.categories      = categories
+        # postObj.allowPings      = post['mt_allow_pings'] == 1
+
+        postObj.permaLink       = post['link']
+        postObj.description     = post['post_content']
+        postObj.title           = post['post_title']
+        postObj.excerpt         = post['post_excerpt']
+        postObj.user            = post['post_author']
+        postObj.date            = time.strptime(str(post['post_date_gmt']), "%Y%m%dT%H:%M:%S")
+        print "Parsing date:", postObj.date, post['post_date']
         postObj.link            = post['link']
-        postObj.textMore        = post['mt_text_more']
-        postObj.allowComments   = post['mt_allow_comments'] == 1
-        postObj.id              = int(post['postid'])
+        postObj.textMore        = ''
+        postObj.allowComments   = post['comment_status'] == 'open'
+        postObj.id              = int(post['post_id'])
+        postObj.parent_id       = int(post['post_parent'])
         categories = []
-        for catname in post['categories']:
-            categories.append(WordPressCategory(name=catname))
+        terms = post['terms']
+        n = len(terms)
+        for i in range(n):
+          print terms[i]
+          if terms[i]['taxonomy']=='category':
+            print terms[i]['name']
+            categories.append(WordPressCategory(name=terms[i]['name']))
 
         postObj.categories      = categories
-        postObj.allowPings      = post['mt_allow_pings'] == 1
+        postObj.allowPings      = post['ping_status']=='open'
         return postObj
 
     def _filterCategory(self, cat):
@@ -341,7 +378,8 @@ class WordPressClient():
     def getPost(self, postId):
         """Get post item
         """
-        return self._filterPost(self._server.metaWeblog.getPost(str(postId), self.user, self.password))
+        # return self._filterPost(self._server.metaWeblog.getPost(str(postId), self.user, self.password))
+        return self._filterPost(self._server.wp.getPost(self.blogId, self.user, self.password,str(postId)))
 
     get_post = getPost
 
@@ -377,8 +415,8 @@ class WordPressClient():
     new_post = newPost
 
     def newPage(self, page, publish):
-        # FIXME: probably wrong
-        id = int(self._save_post('wp', 'newPage', [self.blogId], page, publish))
+        # uses a new namespace function wp.newPost
+        id = int(self._save_post('wp', 'newPost', [self.blogId], page, publish))
         page.id = id
         return id
 
@@ -410,7 +448,27 @@ class WordPressClient():
 
     def _save_post(self, namespace, method_name, args, post, publish):
         # FIXME: does permaLink do anything here?? Doesn't seem so, but wp_slug might
-        blogContent = {
+        blogContent = {}
+
+        print post;
+
+        # for now, the pages use this
+        if namespace == 'wp':
+          blogContent = {
+            'post_title' : post.title,
+            'post_content' : post.description,
+            # 'permaLink' : post.permaLink,
+            'ping_status' : 'closed',
+            'post_excerpt' : post.excerpt,
+            'parent_id' : post.parent_id or 0,
+            'terms' : {},
+            'terms_names' : {},
+            # 'mt_keywords': self._marshal_tags_names(post.tags),
+            # 'categories' : self._marshal_categories_names(post.categories),
+          }
+          # print blogContent
+        else: 
+          blogContent = {
             'title' : post.title,
             'description' : post.description,
             'permaLink' : post.permaLink,
@@ -419,7 +477,9 @@ class WordPressClient():
             'mt_excerpt' : post.excerpt,
             'mt_keywords': self._marshal_tags_names(post.tags),
             'categories' : self._marshal_categories_names(post.categories),
-        }
+          }
+          # print blogContent
+        
 
         if post.date:
             blogContent['date_created_gmt'] = xmlrpclib.DateTime(post.date)

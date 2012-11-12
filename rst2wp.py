@@ -530,6 +530,9 @@ class Rst2Wp(Application):
             'description': body,
             }
 
+        if 'parent_id' in fields.keys():
+          new_post_data['parent_id'] = int(fields['parent_id'])
+
         # Publish priority:
         # 1. --publish/--no-publish
         # 2. :publish: yes
@@ -551,6 +554,8 @@ class Rst2Wp(Application):
             post = wp.get_post(post_id)
 
             post.__dict__.update(new_post_data)
+
+            print "post_id %d, parent_id %d, title: %s" % (post.id, post.parent_id, post.title)
 
             if fields.get('type') == 'page':
                 wp.edit_page(post_id, post, publish)

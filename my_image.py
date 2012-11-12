@@ -141,7 +141,7 @@ class MyImageDirective(directives.images.Image, DownloadDirective):
         name, ext = os.path.splitext(self.current_filename)
         if not ext.lower() == '.jpg': return
         # relies of exiftran:  sudo apt-get install exiftran
-        tmpfile = '/tmp/' + os.path.basename(self.current_filename)
+        tmpfile = '/var/tmp/' + os.path.basename(self.current_filename)
         subprocess.check_call(["exiftran", "-a", self.current_filename, '-o', tmpfile])
         self.current_filename = tmpfile
 

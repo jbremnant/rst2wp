@@ -258,6 +258,7 @@ class WordPressPost():
       return "title: %s, id:%d cat:%s" % (self.title, self.id, catstr)
 
 
+
 def wordpress_call(func):
     '''Decorator that handles the try/catch XMLRPC wrapping'''
     @wraps(func)
@@ -408,19 +409,21 @@ class WordPressClient():
 
         See the documentation for editPost.
         """
-        id = int(self._save_post('metaWeblog', 'newPost', [self.blogId], post, publish))
+        id = int(self._save_post('metaWeblog', 'newPost', [self.blogId], post, publish,'post'))
         post.id = id
         return id
 
     new_post = newPost
 
+
     def newPage(self, page, publish):
         # uses a new namespace function wp.newPost
-        id = int(self._save_post('wp', 'newPost', [self.blogId], page, publish))
+        id = int(self._save_post('wp', 'newPost', [self.blogId], page, publish,'page'))
         page.id = id
         return id
 
     new_page = newPage
+
 
     def editPost(self, postId, post, publish):
         """Save post.
@@ -430,42 +433,48 @@ class WordPressClient():
 
         @param publish True if you want to also publish this post
         """
-        result = self._save_post('metaWeblog', 'editPost', [postId], post, publish)
+        result = self._save_post('metaWeblog', 'editPost', [postId], post, publish,'post')
         if result == 0:
             raise WordPressException('Post edit failed')
         return result
 
     edit_post = editPost
 
+
     def editPage(self, pageId, post, publish):
-        '''FIXME: hacked up extremely roughly'''
-        result = self._save_post('wp', 'editPage', [self.blogId, pageId], post, publish)
+        '''uses newer wp.editPost method. Too bad the args are inconsistent from old api'''
+        result = self._save_post('wp', 'editPost', [self.blogId, pageId], post, publish,'page')
         if result == 0:
             raise WordPressException('Post edit failed')
         return result
 
     edit_page = editPage
 
-    def _save_post(self, namespace, method_name, args, post, publish):
+
+    def _save_post(self, namespace, method_name, args, post, publish, post_type):
         # FIXME: does permaLink do anything here?? Doesn't seem so, but wp_slug might
         blogContent = {}
 
-        print post;
+        # print post;
 
         # for now, the pages use this
         if namespace == 'wp':
           blogContent = {
+            'post_type' : post_type,
             'post_title' : post.title,
             'post_content' : post.description,
             # 'permaLink' : post.permaLink,
             'ping_status' : 'closed',
             'post_excerpt' : post.excerpt,
-            'parent_id' : post.parent_id or 0,
-            'terms' : {},
-            'terms_names' : {},
+            'post_parent' : post.parent_id or 0,
+            # 'terms' : {},
+            # 'terms_names' : {'category':self._marshal_categories_names(post.categories)},
             # 'mt_keywords': self._marshal_tags_names(post.tags),
             # 'categories' : self._marshal_categories_names(post.categories),
           }
+          if publish:
+            blogContent['post_status'] = 'publish'
+
           # print blogContent
         else: 
           blogContent = {
@@ -488,8 +497,13 @@ class WordPressClient():
         # Get remote method: e.g. self._server.metaWeblog.editPost
         ns = getattr(self._server, namespace)
         meth = getattr(ns, method_name)
-        # call remote method: arg0 is blogId for newPost, postId for editPost
-        result = meth(*(args+[self.user, self.password, blogContent, int(publish)]))
+      
+        if namespace=='wp' and method_name=='editPost':
+          # ghetto hack!
+          result = meth(*([args[0]]+[self.user, self.password, int(args[1]), blogContent]))
+        else:
+          # call remote method: arg0 is blogId for newPost, postId for editPost
+          result = meth(*(args+[self.user, self.password, blogContent, int(publish)]))
 
         return result
 
